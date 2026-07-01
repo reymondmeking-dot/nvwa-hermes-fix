@@ -1,8 +1,4 @@
-# Shell scripts MUST be LF or they break on macOS/Linux (bad interpreter, \r everywhere).
-*.sh    text eol=lf
-# Windows-only scripts stay CRLF.
-*.bat   text eol=crlf
-*.ps1   text eol=crlf
-# Docs — normalize to LF, works everywhere.
-*.md    text eol=lf
-LICENSE text eol=lf
+# Shell scripts MUST be LF on GitHub, else macOS/Linux users get
+# `bad interpreter: /usr/bin/env bash^M` when running via curl | bash.
+# This is the only line-ending constraint we actually care about.
+*.sh text eol=lf
