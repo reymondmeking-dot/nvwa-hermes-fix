@@ -7,8 +7,8 @@
     广播 settings-changed），但更适合从终端/脚本里调用。
 
 .EXAMPLE
-    # 一行直取执行（不落盘）：
-    iwr -useb https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/Fix-Hermes-Proxy.ps1 | iex
+    # 下载、检查后执行：
+    Invoke-WebRequest https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/Fix-Hermes-Proxy.ps1 -OutFile Fix-Hermes-Proxy.ps1
 
 .EXAMPLE
     # 下载后本地跑：
@@ -16,19 +16,47 @@
     .\Fix-Hermes-Proxy.ps1 -DryRun
     .\Fix-Hermes-Proxy.ps1 -NoKill
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [switch]$DryRun,
-    [switch]$NoKill
+    [switch]$NoKill,
+    [switch]$Version
 )
 
-$ErrorActionPreference = 'Continue'
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 $IS = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+$script:CommandContext = $PSCmdlet
+
+if ($Version) {
+    Write-Output '1.1.1'
+    return
+}
 
 function Step($n, $msg) { Write-Host "`n[$n] $msg" -ForegroundColor Cyan }
-function Do-It($label, [scriptblock]$block) {
-    if ($DryRun) { Write-Host "  (dry) $label" -ForegroundColor DarkGray }
-    else        { & $block }
+function Invoke-Change($label, [scriptblock]$block) {
+    if ($DryRun) {
+        Write-Host "  (dry) $label" -ForegroundColor DarkGray
+        return
+    }
+    if ($script:CommandContext.ShouldProcess($label)) {
+        & $block
+    }
+}
+function Show-ProxyState {
+    foreach ($v in 'ProxyServer','ProxyEnable','AutoConfigURL') {
+        $item = Get-ItemProperty -Path $IS -Name $v -ErrorAction SilentlyContinue
+        if ($null -eq $item) {
+            $val = '<unset>'
+        } elseif ($v -eq 'ProxyEnable') {
+            $val = if ([int]$item.$v -eq 0) { 'disabled (0)' } else { 'enabled (1)' }
+        } elseif ([string]::IsNullOrEmpty([string]$item.$v)) {
+            $val = '<empty>'
+        } else {
+            $val = '<configured; value redacted>'
+        }
+        Write-Host ('  {0,-14}= {1}' -f $v, $val)
+    }
 }
 
 Write-Host '============================================================'
@@ -42,17 +70,16 @@ Write-Host '============================================================'
 
 # --- 1) Show state ---
 Step '1/4' 'Current WinInet proxy state:'
-foreach ($v in 'ProxyServer','ProxyEnable','AutoConfigURL') {
-    $val = (Get-ItemProperty -Path $IS -Name $v -ErrorAction SilentlyContinue).$v
-    if ($null -eq $val) { $val = '<unset>' }
-    Write-Host ('  {0,-14}= {1}' -f $v, $val)
-}
+Show-ProxyState
 
 # --- 2) Clear WinInet proxy ---
 Step '2/4' 'Clearing WinInet ProxyServer / ProxyEnable / AutoConfigURL ...'
-Do-It 'Set ProxyServer=""'   { Set-ItemProperty -Path $IS -Name ProxyServer   -Value ''  -Type String }
-Do-It 'Set ProxyEnable=0'    { Set-ItemProperty -Path $IS -Name ProxyEnable   -Value 0   -Type DWord }
-Do-It 'Set AutoConfigURL=""' { Set-ItemProperty -Path $IS -Name AutoConfigURL -Value ''  -Type String }
+if (-not (Test-Path -LiteralPath $IS)) {
+    throw "WinInet settings key not found: $IS"
+}
+Invoke-Change 'Set ProxyServer=""'   { Set-ItemProperty -Path $IS -Name ProxyServer   -Value '' -Type String }
+Invoke-Change 'Set ProxyEnable=0'    { Set-ItemProperty -Path $IS -Name ProxyEnable   -Value 0  -Type DWord }
+Invoke-Change 'Set AutoConfigURL=""' { Set-ItemProperty -Path $IS -Name AutoConfigURL -Value '' -Type String }
 Write-Host '  done.'
 
 # --- 3) Stop Hermes backend ---
@@ -71,9 +98,12 @@ if ($NoKill) {
         elseif (($name -eq 'python.exe' -or $name -eq 'pythonw.exe') -and
                 ($cmd -match 'hermes_cli|tui_gateway|slash_worker|hermes\.gateway')) { $hit = $true }
         if ($hit -and $_.ProcessId -ne $PID) {
-            Write-Host ('  killing pid {0} ({1})' -f $_.ProcessId, $_.Name)
-            Do-It "Stop-Process $($_.ProcessId)" {
-                try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $script:killed++ } catch {}
+            $processId = [int]$_.ProcessId
+            $processName = [string]$_.Name
+            Write-Host ('  killing pid {0} ({1})' -f $processId, $processName)
+            Invoke-Change "Stop-Process $processId" {
+                Stop-Process -Id $processId -Force
+                $script:killed++
             }
         }
     }
@@ -82,8 +112,10 @@ if ($NoKill) {
 
 # --- 4) Broadcast WinInet settings-changed ---
 Step '4/4' 'Broadcasting WinInet settings-changed ...'
-Do-It 'InternetSetOption(SETTINGS_CHANGED + REFRESH)' {
-    Add-Type -Namespace WI -Name Api -MemberDefinition '[DllImport("wininet.dll", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l);' -ErrorAction SilentlyContinue
+Invoke-Change 'InternetSetOption(SETTINGS_CHANGED + REFRESH)' {
+    if (-not ('WI.Api' -as [type])) {
+        Add-Type -Namespace WI -Name Api -MemberDefinition '[DllImport("wininet.dll", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l);'
+    }
     [void][WI.Api]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)
     [void][WI.Api]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)
 }
@@ -91,11 +123,7 @@ Write-Host '  done.'
 
 Write-Host "`n============================================================"
 Write-Host ' Post-fix state:'
-foreach ($v in 'ProxyServer','ProxyEnable','AutoConfigURL') {
-    $val = (Get-ItemProperty -Path $IS -Name $v -ErrorAction SilentlyContinue).$v
-    if ($null -eq $val) { $val = '<unset>' }
-    Write-Host ('  {0,-14}= {1}' -f $v, $val)
-}
+Show-ProxyState
 Write-Host ''
 Write-Host ' Restart Hermes from your desktop / Start Menu shortcut.'
 Write-Host '============================================================'

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate Bash syntax
+        run: bash -n fix-hermes-proxy.sh
+      - name: Reject raw proxy credential output
+        run: |
+          ! grep -En 'Proxy(Server|AutoConfigURL).*%%B|scutil --proxy[[:space:]]*\|[[:space:]]*sed' Fix-Hermes-Proxy.bat fix-hermes-proxy.sh
+      - name: Exercise Linux dry run
+        run: bash tests/test-shell-redaction.sh
+
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Exercise PowerShell dry run
+        shell: powershell
+        run: .\Fix-Hermes-Proxy.ps1 -DryRun -NoKill
+      - name: Exercise batch dry run and redaction
+        shell: powershell
+        run: .\tests\Test-BatRedaction.ps1

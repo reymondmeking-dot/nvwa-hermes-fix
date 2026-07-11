@@ -4,6 +4,8 @@
 
 **跨平台**：Windows（`.bat` 双击 / `.ps1` CLI）、macOS / Linux（`.sh` CLI）。
 
+当前版本：**1.1.1**
+
 ---
 
 ## 现象
@@ -52,11 +54,19 @@ Python 的 `httpx` 客户端启动时会**一次性读取代理配置并缓存**
 iwr -useb https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/Fix-Hermes-Proxy.bat -OutFile "$env:USERPROFILE\Desktop\Fix-Hermes-Proxy.bat"
 ```
 
+批处理也支持无改动预览和自动化运行：
+
+```powershell
+.\Fix-Hermes-Proxy.bat --dry-run --no-kill --no-pause
+```
+
 ### CLI 方式（PowerShell）
 
-**一行直取执行**（不落盘，适合远程支持）：
+**下载、检查后执行**：
 ```powershell
-iwr -useb https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/Fix-Hermes-Proxy.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/Fix-Hermes-Proxy.ps1 -OutFile Fix-Hermes-Proxy.ps1
+Get-Content .\Fix-Hermes-Proxy.ps1
+.\Fix-Hermes-Proxy.ps1
 ```
 
 **下载后本地跑**：
@@ -71,21 +81,17 @@ iwr -useb https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/ma
 
 ## macOS / Linux
 
-**一行直取执行**：
+**下载、检查后本地运行**：
 ```bash
-curl -sSL https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/fix-hermes-proxy.sh | bash
-```
-
-**下载后本地跑**：
-```bash
-curl -sSLO https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/fix-hermes-proxy.sh
+curl --fail --show-error --location --remote-name https://raw.githubusercontent.com/reymondmeking-dot/nvwa-hermes-fix/main/fix-hermes-proxy.sh
+less fix-hermes-proxy.sh
 chmod +x fix-hermes-proxy.sh
 ./fix-hermes-proxy.sh              # 正常运行
 ./fix-hermes-proxy.sh --dry-run    # 只打印，不改动
 ./fix-hermes-proxy.sh --no-kill    # 只清代理，不杀 Hermes 进程
 ```
 
-**注意**（macOS/Linux）：`unset HTTP_PROXY` 只对**当前 shell** 生效。持久生效需要移除 `~/.zshrc` / `~/.bashrc` 里的 `export HTTP_PROXY=...` 行，脚本会提示要检查哪些文件。
+**注意**（macOS/Linux）：作为子进程运行的脚本无法修改父 shell。脚本会清理自身环境并打印一条固定的 `unset` 命令；如需清理当前终端，请在脚本结束后执行该命令。持久生效仍需移除 `~/.zshrc` / `~/.bashrc` 里的相关 `export` 行。
 
 ## 使用后
 
